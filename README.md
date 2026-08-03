@@ -7,11 +7,13 @@
 ## 安装
 
 1. 安装 [Tampermonkey](https://www.tampermonkey.net/) 或其他兼容的用户脚本管理器，并确认已启用用户脚本。
-2. [点击安装 ACM Contest Time Machine](https://raw.githubusercontent.com/Haerbin23456/contest-time-machine/main/contest-time-machine.user.js)。
+2. 选择任一来源安装脚本：
+   - [从 Greasy Fork 安装](https://greasyfork.org/zh-CN/scripts/589686-acm-contest-time-machine)
+   - [从 GitHub 安装](https://raw.githubusercontent.com/Haerbin23456/contest-time-machine/main/contest-time-machine.user.js)
 3. 登录比赛平台，打开对应比赛的排行榜页面。
 4. 点击页面右下角的“时光榜”。
 
-脚本通过 `@updateURL` 自动检查 GitHub 上的新版本。
+用户脚本管理器会从对应的安装来源检查更新。
 
 ## 支持范围
 
