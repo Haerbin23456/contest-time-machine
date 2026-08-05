@@ -2,7 +2,7 @@
 // @name         ACM Contest Time Machine
 // @name:zh-CN   ACM 比赛时光榜
 // @namespace    https://github.com/Haerbin23456
-// @version      0.6.3
+// @version      0.6.4
 // @description  Rebuild Nowcoder and HDU ACM standings at any moment during a contest.
 // @description:zh-CN  回放牛客与杭电 ACM 比赛任意时刻的榜单。
 // @homepageURL  https://github.com/Haerbin23456/contest-time-machine
@@ -23,6 +23,8 @@
   const HOST_ID = 'acm-time-machine-host';
   const STYLE_ID = 'acm-time-machine-style';
   const PLAYBACK_SPEED_KEY = 'acm-time-machine:playback-speed';
+  const LAUNCHER_POSITION_KEY = 'acm-time-machine:launcher-position';
+  const LAUNCHER_EDGE_GAP = 6;
   const WRONG_PENALTY_MS = 20 * 60 * 1000;
   const MAX_CONCURRENCY = 6;
 
@@ -81,10 +83,12 @@
       .actm-launcher {
         position: fixed; right: 22px; bottom: 22px; z-index: 2147483001;
         height: 40px; padding: 0 15px; border: 1px solid #1f6f4a; border-radius: 6px;
-        background: #1f6f4a; color: #fff; font-weight: 600; cursor: pointer;
+        background: #1f6f4a; color: #fff; font-weight: 600; cursor: grab;
+        touch-action: none; user-select: none;
         box-shadow: 0 4px 14px rgba(0,0,0,.18);
       }
       .actm-launcher:hover { background: #185b3d; }
+      .actm-launcher.dragging { cursor: grabbing; }
       .actm-backdrop { position: fixed; inset: 0; display: none; background: rgba(20,24,28,.46); z-index: 2147483002; }
       .actm-backdrop.open { display: block; }
       .actm-panel {
@@ -284,7 +288,12 @@
   }
 
   function bindUi(ui) {
-    ui.launcher.addEventListener('click', async () => {
+    const launcherDrag = bindLauncherDrag(ui.launcher);
+    ui.launcher.addEventListener('click', async event => {
+      if (launcherDrag.shouldSuppressClick()) {
+        event.preventDefault();
+        return;
+      }
       ui.backdrop.classList.add('open');
       ui.backdrop.setAttribute('aria-hidden', 'false');
       await ensureLoaded(ui);
@@ -337,7 +346,10 @@
       savePinnedTeams(state.contest);
       render(ui);
     });
-    window.addEventListener('resize', () => updatePinnedOffsets(ui));
+    window.addEventListener('resize', () => {
+      updatePinnedOffsets(ui);
+      constrainLauncher(ui.launcher, true);
+    });
     document.addEventListener('keydown', event => {
       if (!ui.backdrop.classList.contains('open')) return;
       const target = event.composedPath()[0] || event.target;
@@ -362,6 +374,94 @@
         state.playing ? stopPlayback(ui) : startPlayback(ui);
       }
     });
+  }
+
+  function bindLauncherDrag(launcher) {
+    let drag = null;
+    let suppressClickUntil = 0;
+
+    restoreLauncherPosition(launcher);
+
+    launcher.addEventListener('pointerdown', event => {
+      if (!event.isPrimary || event.button !== 0) return;
+      const rect = launcher.getBoundingClientRect();
+      drag = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        left: rect.left,
+        top: rect.top,
+        moved: false,
+      };
+      launcher.setPointerCapture(event.pointerId);
+    });
+
+    launcher.addEventListener('pointermove', event => {
+      if (!drag || event.pointerId !== drag.pointerId) return;
+      const dx = event.clientX - drag.startX;
+      const dy = event.clientY - drag.startY;
+      if (!drag.moved && Math.hypot(dx, dy) < 4) return;
+      drag.moved = true;
+      launcher.classList.add('dragging');
+      setLauncherPosition(launcher, drag.left + dx, drag.top + dy);
+      event.preventDefault();
+    });
+
+    const finishDrag = event => {
+      if (!drag || event.pointerId !== drag.pointerId) return;
+      if (launcher.hasPointerCapture(event.pointerId)) launcher.releasePointerCapture(event.pointerId);
+      launcher.classList.remove('dragging');
+      if (drag.moved) {
+        saveLauncherPosition(launcher);
+        suppressClickUntil = performance.now() + 150;
+      }
+      drag = null;
+    };
+
+    launcher.addEventListener('pointerup', finishDrag);
+    launcher.addEventListener('pointercancel', finishDrag);
+
+    return {
+      shouldSuppressClick: () => performance.now() < suppressClickUntil,
+    };
+  }
+
+  function setLauncherPosition(launcher, left, top) {
+    const maxLeft = Math.max(LAUNCHER_EDGE_GAP, window.innerWidth - launcher.offsetWidth - LAUNCHER_EDGE_GAP);
+    const maxTop = Math.max(LAUNCHER_EDGE_GAP, window.innerHeight - launcher.offsetHeight - LAUNCHER_EDGE_GAP);
+    launcher.style.left = `${clamp(left, LAUNCHER_EDGE_GAP, maxLeft)}px`;
+    launcher.style.top = `${clamp(top, LAUNCHER_EDGE_GAP, maxTop)}px`;
+    launcher.style.right = 'auto';
+    launcher.style.bottom = 'auto';
+  }
+
+  function constrainLauncher(launcher, persist) {
+    if (!launcher.style.left) return;
+    const rect = launcher.getBoundingClientRect();
+    setLauncherPosition(launcher, rect.left, rect.top);
+    if (persist) saveLauncherPosition(launcher);
+  }
+
+  function saveLauncherPosition(launcher) {
+    try {
+      localStorage.setItem(LAUNCHER_POSITION_KEY, JSON.stringify({
+        left: Number.parseFloat(launcher.style.left),
+        top: Number.parseFloat(launcher.style.top),
+      }));
+    } catch {
+      // Keep the position for the current page when site storage is unavailable.
+    }
+  }
+
+  function restoreLauncherPosition(launcher) {
+    try {
+      const position = JSON.parse(localStorage.getItem(LAUNCHER_POSITION_KEY));
+      if (Number.isFinite(position?.left) && Number.isFinite(position?.top)) {
+        setLauncherPosition(launcher, position.left, position.top);
+      }
+    } catch {
+      // Use the default bottom-right position when the saved value is unavailable.
+    }
   }
 
   async function ensureLoaded(ui, force = false) {
