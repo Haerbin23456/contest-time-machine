@@ -2,7 +2,7 @@
 // @name         ACM Contest Time Machine
 // @name:zh-CN   ACM 比赛时光榜
 // @namespace    https://github.com/Haerbin23456
-// @version      0.6.4
+// @version      0.6.5
 // @description  Rebuild Nowcoder and HDU ACM standings at any moment during a contest.
 // @description:zh-CN  回放牛客与杭电 ACM 比赛任意时刻的榜单。
 // @homepageURL  https://github.com/Haerbin23456/contest-time-machine
@@ -517,18 +517,24 @@
       id: String(problem.problemId),
       name: problem.name,
     }));
-    const teams = dedupeTeams(pages.flatMap(page => page.rankData || []).map(team => ({
-      key: String(team.uid),
-      name: team.userName || String(team.uid),
-      school: team.school || '',
-      finalRank: Number(team.ranking || Number.MAX_SAFE_INTEGER),
-      scores: (team.scoreList || []).map(score => ({
-        problemId: String(score.problemId),
-        acceptedTime: score.accepted ? Number(score.acceptedTime) : -1,
-        failedCount: Number(score.failedCount || 0),
-        firstBlood: Boolean(score.firstBlood),
-      })),
-    })));
+    const currentUid = String(basic.basicUid ?? '');
+    const teams = dedupeTeams(pages.flatMap(page => page.rankData || []).map(team => {
+      const key = String(team.uid);
+      const memberUids = (team.teamMemberUids || []).map(String);
+      return {
+        key,
+        name: team.userName || key,
+        school: team.school || '',
+        finalRank: Number(team.ranking || Number.MAX_SAFE_INTEGER),
+        self: currentUid !== '-1' && (key === currentUid || memberUids.includes(currentUid)),
+        scores: (team.scoreList || []).map(score => ({
+          problemId: String(score.problemId),
+          acceptedTime: score.accepted ? Number(score.acceptedTime) : -1,
+          failedCount: Number(score.failedCount || 0),
+          firstBlood: Boolean(score.firstBlood),
+        })),
+      };
+    }));
     return {
       id: contestId,
       platform: 'Nowcoder',
@@ -537,6 +543,7 @@
       endTime,
       problems,
       teams,
+      selfTeamKey: teams.find(team => team.self)?.key || null,
     };
   }
 
@@ -601,6 +608,10 @@
     }
     const loginHtml = await fetchText(`/contest/login?cid=${encodeURIComponent(contestId)}`);
     const loginDocument = new DOMParser().parseFromString(loginHtml, 'text/html');
+    const uniqueTeams = dedupeTeams(teams);
+    const accountName = firstDocument.querySelector('.contest-header > .dropdown > [data-bs-toggle="dropdown"]')?.textContent.trim()
+      || firstDocument.querySelector('.contest-header > .dropdown > :first-child')?.textContent.trim()
+      || '';
     return {
       id: contestId,
       platform: 'HDU',
@@ -608,7 +619,8 @@
       startTime: Number(contestInfo.start) * 1000,
       endTime: Number(contestInfo.end) * 1000,
       problems,
-      teams: dedupeTeams(teams),
+      teams: uniqueTeams,
+      selfTeamKey: uniqueTeams.find(team => team.name === accountName)?.key || null,
     };
   }
 
@@ -876,12 +888,15 @@
   }
 
   function loadPinnedTeams(contest) {
+    const defaultPinned = () => new Set(contest.selfTeamKey ? [contest.selfTeamKey] : []);
     try {
-      const saved = JSON.parse(localStorage.getItem(pinnedStorageKey(contest)) || '[]');
+      const raw = localStorage.getItem(pinnedStorageKey(contest));
+      if (raw === null) return defaultPinned();
+      const saved = JSON.parse(raw);
       const knownKeys = new Set(contest.teams.map(team => team.key));
       return new Set(Array.isArray(saved) ? saved.filter(key => knownKeys.has(String(key))).map(String) : []);
     } catch {
-      return new Set();
+      return defaultPinned();
     }
   }
 
