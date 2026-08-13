@@ -2,7 +2,7 @@
 // @name         ACM Contest Time Machine
 // @name:zh-CN   ACM 比赛时光榜
 // @namespace    https://github.com/Haerbin23456
-// @version      0.7.1
+// @version      0.8.0
 // @description  Rebuild Nowcoder and HDU ACM standings at any moment during a contest.
 // @description:zh-CN  回放牛客与杭电 ACM 比赛任意时刻的榜单。
 // @homepageURL  https://github.com/Haerbin23456/contest-time-machine
@@ -42,6 +42,8 @@
     playAnchorTime: 0,
     renderFrame: 0,
     pinnedTeamKeys: new Set(),
+    submissionCache: new Map(),
+    submissionRequestId: 0,
   };
 
   const site = location.hostname === 'ac.nowcoder.com'
@@ -152,15 +154,73 @@
       .actm-pinned td.rank, .actm-pinned td.team { z-index: 4; background: #fff9e8; }
       .actm-team-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
       .actm-school { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #737b82; font-size: 11px; }
+      .actm-problem-link { color: inherit; text-decoration: none; }
+      .actm-problem-link:hover { color: #176a47; text-decoration: underline; text-underline-offset: 2px; }
+      .actm-problem-link:focus-visible { outline: 2px solid #1f6f4a; outline-offset: 2px; }
       .actm-problem-count { display: block; margin-top: 1px; color: #737b82; font-size: 10px; font-weight: 500; }
       .actm-accepted { background: #dff2e6; color: #135c38; font-weight: 650; }
       .actm-accepted.wrong { background: #f7e8d2; color: #78511d; }
       .actm-fail { display: block; margin-top: 1px; font-size: 10px; font-weight: 500; }
       .actm-empty { color: #a4abb1; }
+      .actm-submission-cell { cursor: pointer; transition: box-shadow .12s ease, filter .12s ease; }
+      .actm-submission-cell:hover { box-shadow: inset 0 0 0 2px #5c9277; filter: brightness(.98); }
+      .actm-submission-cell:focus-visible { outline: 2px solid #1f6f4a; outline-offset: -2px; }
       .actm-footer { display: flex; align-items: center; gap: 12px; min-height: 38px; padding: 6px 14px; border-top: 1px solid #d9dde1; color: #687078; font-size: 12px; }
       .actm-status { margin-left: auto; font-variant-numeric: tabular-nums; }
       .actm-loading { display: grid; place-items: center; min-height: 240px; color: #4f575e; font-size: 14px; }
       .actm-error { color: #a12727; white-space: pre-wrap; }
+      .actm-submission-layer { position: absolute; inset: 0; z-index: 20; display: none; place-items: center; padding: 24px; background: rgba(28,33,38,.48); backdrop-filter: blur(1px); }
+      .actm-submission-layer.open { display: grid; }
+      .actm-submission-dialog { display: grid; grid-template-rows: auto minmax(0,1fr) auto; width: fit-content; min-width: min(620px,100%); max-width: 100%; max-height: min(640px,calc(100% - 16px)); overflow: hidden; border: 1px solid #cbd1d6; border-radius: 6px; background: #fff; box-shadow: 0 24px 70px rgba(0,0,0,.32); }
+      .actm-submission-header { display: flex; align-items: center; gap: 16px; min-height: 70px; padding: 12px 14px 12px 20px; border-bottom: 1px solid #dfe3e6; background: #fff; }
+      .actm-submission-heading { min-width: 0; flex: 1; text-align: left; }
+      .actm-submission-title { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #1f252a; font-size: 18px; line-height: 24px; font-weight: 700; }
+      .actm-submission-subtitle { display: flex; align-items: center; gap: 7px; min-width: 0; margin-top: 4px; color: #687078; font-size: 12px; }
+      .actm-submission-school { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #4f5961; }
+      .actm-submission-meta { flex: none; color: #7b848b; }
+      .actm-submission-meta::before { content: ''; display: inline-block; width: 3px; height: 3px; margin: 0 7px 2px 0; border-radius: 50%; background: #a2a9ae; }
+      .actm-submission-content { min-height: 160px; overflow: auto; }
+      .actm-submission-message { display: grid; place-items: center; min-height: 190px; padding: 24px; color: #596168; text-align: center; }
+      .actm-submission-message.error { color: #a12727; }
+      .actm-submission-table { width: max-content; min-width: 620px; border-collapse: separate; border-spacing: 0; table-layout: auto; font-size: 13px; }
+      .actm-submission-table th, .actm-submission-table td { height: 46px; padding: 7px 14px; border-bottom: 1px solid #e6e9eb; text-align: left; vertical-align: middle; }
+      .actm-submission-table th { position: sticky; top: 0; z-index: 1; height: 40px; background: #f4f6f7; color: #596168; text-align: left; font-size: 12px; font-weight: 650; }
+      .actm-submission-table tbody tr:nth-child(even) { background: #fafbfb; }
+      .actm-submission-table tbody tr:hover { background: #f0f6f3; }
+      .actm-submission-table th:first-child, .actm-submission-table td:first-child { width: 14%; padding-left: 20px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+      .actm-submission-table th:nth-child(2), .actm-submission-table td:nth-child(2) { width: 1%; white-space: nowrap; }
+      .actm-submission-table th:nth-child(3), .actm-submission-table td:nth-child(3) { width: 1%; white-space: nowrap; }
+      .actm-language { display: block; width: max-content; max-width: clamp(110px,20vw,190px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .actm-submission-table th:nth-child(4), .actm-submission-table td:nth-child(4),
+      .actm-submission-table th:nth-child(5), .actm-submission-table td:nth-child(5),
+      .actm-submission-table th:last-child, .actm-submission-table td:last-child { width: 1%; white-space: nowrap; }
+      .actm-submission-table th:nth-child(4), .actm-submission-table td:nth-child(4),
+      .actm-submission-table th:nth-child(5), .actm-submission-table td:nth-child(5) { padding-left: 10px; padding-right: 10px; font-variant-numeric: tabular-nums; }
+      .actm-submission-table th:last-child, .actm-submission-table td:last-child { padding-left: 10px; padding-right: 20px; }
+      .actm-submission-table th:nth-child(4), .actm-submission-table td:nth-child(4),
+      .actm-submission-table th:nth-child(5), .actm-submission-table td:nth-child(5),
+      .actm-submission-table th:last-child, .actm-submission-table td:last-child { text-align: right; }
+      .actm-submission-time { color: #30383e; font-weight: 600; }
+      .actm-verdict { display: inline-flex; align-items: flex-start; gap: 7px; font-weight: 650; }
+      .actm-verdict::before { content: ''; width: 7px; height: 7px; flex: none; margin-top: .42em; border-radius: 50%; background: currentColor; }
+      .actm-verdict-copy { display: grid; width: max-content; line-height: 1.3; }
+      .actm-verdict.accepted { color: #52c41a; }
+      .actm-verdict.wrong-answer,
+      .actm-verdict.presentation-error { color: #e74c3c; }
+      .actm-verdict.runtime-error,
+      .actm-verdict.segment-fault,
+      .actm-verdict.execution-error { color: #9d3dcf; }
+      .actm-verdict.compile-error { color: #fadb14; }
+      .actm-verdict.time-limit,
+      .actm-verdict.memory-limit,
+      .actm-verdict.output-limit { color: #052242; }
+      .actm-verdict.pending { color: #bfbfbf; }
+      .actm-verdict.other { color: #0e1d69; }
+      .actm-source-link { display: inline-flex; align-items: center; justify-content: flex-end; gap: 4px; color: #176a47; font-weight: 650; text-decoration: none; white-space: nowrap; }
+      .actm-source-link:hover { text-decoration: underline; }
+      .actm-submission-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 42px; padding: 8px 20px; border-top: 1px solid #dfe3e6; background: #fff; color: #687078; font-size: 12px; }
+      .actm-submission-count { font-variant-numeric: tabular-nums; }
+      .actm-submission-hint { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #899096; text-align: right; }
       @media (max-width: 820px) {
         #${ROOT_ID} { --actm-rank-width: 48px; --actm-team-width: 200px; --actm-solved-width: 52px; --actm-penalty-width: 60px; --actm-problem-width: 56px; }
         .actm-panel { inset: 6px; min-width: 0; }
@@ -182,6 +242,12 @@
       }
       @media (max-width: 640px) {
         .actm-controls { grid-template-columns: minmax(0,1fr); }
+        .actm-submission-layer { padding: 8px; }
+        .actm-submission-dialog { max-height: calc(100% - 8px); }
+        .actm-submission-header { min-height: 64px; padding: 10px 12px 10px 16px; }
+        .actm-submission-title { font-size: 16px; }
+        .actm-submission-footer { padding: 7px 16px; }
+        .actm-submission-hint { display: none; }
       }
       @media (max-width: 480px) {
         #${ROOT_ID} { --actm-rank-width: 44px; --actm-team-width: 160px; --actm-solved-width: 48px; --actm-penalty-width: 56px; --actm-problem-width: 52px; }
@@ -259,6 +325,25 @@
             <span class="actm-status"></span>
           </footer>
         </section>
+        <div class="actm-submission-layer" aria-hidden="true">
+          <section class="actm-submission-dialog" role="dialog" aria-modal="true" aria-labelledby="actm-submission-title">
+            <header class="actm-submission-header">
+              <div class="actm-submission-heading">
+                <h3 class="actm-submission-title" id="actm-submission-title">提交记录</h3>
+                <div class="actm-submission-subtitle">
+                  <span class="actm-submission-school"></span>
+                  <span class="actm-submission-meta"></span>
+                </div>
+              </div>
+              <button class="actm-close actm-submission-close" type="button" title="关闭提交记录">&times;</button>
+            </header>
+            <div class="actm-submission-content"></div>
+            <footer class="actm-submission-footer">
+              <span class="actm-submission-count"></span>
+              <span class="actm-submission-hint">代码可见性由原平台权限决定</span>
+            </footer>
+          </section>
+        </div>
       </div>
     `;
     container.appendChild(root);
@@ -285,6 +370,13 @@
       summary: root.querySelector('.actm-summary'),
       tableWrap: root.querySelector('.actm-table-wrap'),
       status: root.querySelector('.actm-status'),
+      submissionLayer: root.querySelector('.actm-submission-layer'),
+      submissionTitle: root.querySelector('.actm-submission-title'),
+      submissionSchool: root.querySelector('.actm-submission-school'),
+      submissionMeta: root.querySelector('.actm-submission-meta'),
+      submissionContent: root.querySelector('.actm-submission-content'),
+      submissionCount: root.querySelector('.actm-submission-count'),
+      submissionClose: root.querySelector('.actm-submission-close'),
     };
   }
 
@@ -301,13 +393,19 @@
       requestAnimationFrame(() => updatePinnedOffsets(ui));
     });
     ui.close.addEventListener('click', () => closePanel(ui));
+    ui.submissionClose.addEventListener('click', () => closeSubmissionModal(ui));
+    ui.submissionLayer.addEventListener('mousedown', event => {
+      if (event.target === ui.submissionLayer) closeSubmissionModal(ui);
+    });
     ui.backdrop.addEventListener('mousedown', event => {
       if (event.target === ui.backdrop) closePanel(ui);
     });
     ui.refresh.addEventListener('click', async () => {
       stopPlayback(ui);
+      closeSubmissionModal(ui);
       state.contest = null;
       state.loading = null;
+      state.submissionCache.clear();
       await ensureLoaded(ui, true);
     });
     ui.range.addEventListener('input', () => setSecond(ui, Number(ui.range.value)));
@@ -339,15 +437,26 @@
       state.rowLimit = Number(ui.rowLimit.value);
       scheduleRender(ui);
     });
-    ui.tableWrap.addEventListener('click', event => {
+    ui.tableWrap.addEventListener('click', async event => {
       const button = event.target.closest('.actm-pin');
-      if (!button || !state.contest) return;
-      const key = button.dataset.teamKey;
-      if (!key) return;
-      if (state.pinnedTeamKeys.has(key)) state.pinnedTeamKeys.delete(key);
-      else state.pinnedTeamKeys.add(key);
-      savePinnedTeams(state.contest);
-      render(ui);
+      if (button && state.contest) {
+        const key = button.dataset.teamKey;
+        if (!key) return;
+        if (state.pinnedTeamKeys.has(key)) state.pinnedTeamKeys.delete(key);
+        else state.pinnedTeamKeys.add(key);
+        savePinnedTeams(state.contest);
+        render(ui);
+        return;
+      }
+      const cell = event.target.closest('.actm-submission-cell');
+      if (cell) await openSubmissionModal(ui, cell.dataset.teamKey, Number(cell.dataset.problemIndex));
+    });
+    ui.tableWrap.addEventListener('keydown', async event => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      const cell = event.target.closest('.actm-submission-cell');
+      if (!cell) return;
+      event.preventDefault();
+      await openSubmissionModal(ui, cell.dataset.teamKey, Number(cell.dataset.problemIndex));
     });
     window.addEventListener('resize', () => {
       updatePinnedOffsets(ui);
@@ -359,7 +468,8 @@
       const editing = /^(INPUT|SELECT|TEXTAREA)$/.test(target?.tagName || '');
       if (event.key === 'Escape') {
         event.preventDefault();
-        closePanel(ui);
+        if (ui.submissionLayer.classList.contains('open')) closeSubmissionModal(ui);
+        else closePanel(ui);
       } else if (!editing && event.key === 'ArrowLeft') {
         event.preventDefault();
         setSecond(ui, state.second - (event.shiftKey ? 60 : 1));
@@ -519,6 +629,7 @@
     const problems = first.data.problemData.map(problem => ({
       id: String(problem.problemId),
       name: problem.name,
+      url: `/acm/contest/${encodeURIComponent(contestId)}/${encodeURIComponent(problem.name)}`,
     }));
     const currentUid = String(basic.basicUid ?? '');
     const teams = dedupeTeams(pages.flatMap(page => page.rankData || []).map(team => {
@@ -575,7 +686,7 @@
       const href = cell.querySelector('a')?.getAttribute('href');
       const problemId = href ? new URL(href, location.origin).searchParams.get('pid') : null;
       const label = problemId || String(index + 1);
-      return { id: label, name: label };
+      return { id: label, name: label, url: href ? new URL(href, location.origin).href : '' };
     });
     const teams = [];
     for (const html of pages) {
@@ -714,18 +825,21 @@
 
     const header = contest.problems.map((problem, index) => `
       <th class="problem" title="${escapeHtml(problem.name)}">
-        ${escapeHtml(problem.name)}
+        ${problem.url
+          ? `<a class="actm-problem-link" href="${escapeHtml(problem.url)}" target="_blank" rel="noopener noreferrer" title="打开题目 ${escapeHtml(problem.name)}">${escapeHtml(problem.name)}</a>`
+          : escapeHtml(problem.name)}
         <span class="actm-problem-count">${snapshot.problemAccepted[index]}</span>
       </th>
     `).join('');
     const body = rows.map(row => {
-      const cells = row.accepted.map(score => {
-        if (!score) return '<td class="problem actm-empty"></td>';
+      const cells = row.accepted.map((score, problemIndex) => {
+        const data = `data-team-key="${escapeHtml(row.key)}" data-problem-index="${problemIndex}"`;
+        if (!score) return `<td class="problem actm-empty actm-submission-cell" ${data} role="button" tabindex="0" title="查看提交记录"></td>`;
         const elapsedSecond = Math.floor((score.acceptedTime - contest.startTime) / 1000);
         const wrongClass = score.failedCount > 0 ? ' wrong' : '';
         const fail = score.failedCount > 0 ? `<span class="actm-fail">-${score.failedCount}</span>` : '';
         const first = score.firstBlood ? '*' : '';
-        return `<td class="problem actm-accepted${wrongClass}" title="${formatDuration(elapsedSecond)}，错误 ${score.failedCount} 次">${Math.floor(elapsedSecond / 60)}${first}${fail}</td>`;
+        return `<td class="problem actm-accepted actm-submission-cell${wrongClass}" ${data} role="button" tabindex="0" title="${formatDuration(elapsedSecond)}，错误 ${score.failedCount} 次；点击查看提交记录">${Math.floor(elapsedSecond / 60)}${first}${fail}</td>`;
       }).join('');
       const pinned = state.pinnedTeamKeys.has(row.key);
       return `
@@ -771,6 +885,187 @@
       row.style.setProperty('--actm-pin-top', `${top}px`);
       top += row.getBoundingClientRect().height;
     }
+  }
+
+  async function openSubmissionModal(ui, teamKey, problemIndex) {
+    const contest = state.contest;
+    const team = contest?.teams.find(item => item.key === String(teamKey));
+    const problem = contest?.problems[problemIndex];
+    if (!contest || !team || !problem) return;
+
+    const requestId = ++state.submissionRequestId;
+    ui.submissionTitle.textContent = `${team.name} · ${problem.name}`;
+    ui.submissionSchool.textContent = team.school || '未提供学校信息';
+    ui.submissionSchool.title = team.school || '';
+    ui.submissionMeta.textContent = `${contest.platform} · 整场比赛`;
+    ui.submissionCount.textContent = '';
+    ui.submissionContent.innerHTML = '<div class="actm-submission-message">正在读取提交记录...</div>';
+    ui.submissionLayer.classList.add('open');
+    ui.submissionLayer.setAttribute('aria-hidden', 'false');
+
+    try {
+      const submissions = await loadSubmissions(contest, team, problem);
+      if (requestId !== state.submissionRequestId || !ui.submissionLayer.classList.contains('open')) return;
+      renderSubmissions(ui, contest, submissions);
+    } catch (error) {
+      if (requestId !== state.submissionRequestId || !ui.submissionLayer.classList.contains('open')) return;
+      console.error('[ACM Time Machine] Failed to load submissions', error);
+      ui.submissionContent.innerHTML = `<div class="actm-submission-message error">${escapeHtml(error.message || String(error))}</div>`;
+    }
+  }
+
+  function closeSubmissionModal(ui) {
+    state.submissionRequestId += 1;
+    ui.submissionLayer.classList.remove('open');
+    ui.submissionLayer.setAttribute('aria-hidden', 'true');
+  }
+
+  function renderSubmissions(ui, contest, submissions) {
+    const acceptedCount = submissions.filter(submission => isAcceptedVerdict(submission.verdict)).length;
+    ui.submissionCount.textContent = `${submissions.length} 次提交 · ${acceptedCount} 次 AC`;
+    if (!submissions.length) {
+      ui.submissionContent.innerHTML = '<div class="actm-submission-message">这支队伍在本场比赛中没有提交这道题。</div>';
+      return;
+    }
+    const rows = submissions.map(submission => {
+      const elapsedSecond = Math.max(0, Math.floor((submission.submitTime - contest.startTime) / 1000));
+      const verdictClass = submissionVerdictClass(submission.verdict);
+      const [verdictMain, verdictDetail] = splitVerdictLabel(submission.verdict);
+      const verdictLabel = `<span class="actm-verdict-copy"><span>${escapeHtml(verdictMain)}</span>${verdictDetail ? `<span>${escapeHtml(verdictDetail)}</span>` : ''}</span>`;
+      const link = submission.sourceUrl
+        ? `<a class="actm-source-link" href="${escapeHtml(submission.sourceUrl)}" target="_blank" rel="noopener noreferrer" title="前往原平台查看提交">代码 &#8599;</a>`
+        : '-';
+      return `
+        <tr>
+          <td class="actm-submission-time" title="${escapeHtml(formatDateTime(submission.submitTime))}">${formatDuration(elapsedSecond)}</td>
+          <td><span class="actm-verdict ${verdictClass}" title="${escapeHtml(submission.verdict)}">${verdictLabel}</span></td>
+          <td><span class="actm-language" title="${escapeHtml(submission.language)}">${escapeHtml(submission.language)}</span></td>
+          <td>${formatRuntime(submission.timeMs)}</td>
+          <td>${formatMemory(submission.memoryKb)}</td>
+          <td>${link}</td>
+        </tr>
+      `;
+    }).join('');
+    ui.submissionContent.innerHTML = `
+      <table class="actm-submission-table">
+        <thead><tr>
+          <th>赛时</th>
+          <th>结果</th>
+          <th>语言</th>
+          <th>耗时</th>
+          <th>内存</th>
+          <th aria-label="代码"></th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    `;
+  }
+
+  async function loadSubmissions(contest, team, problem) {
+    const cacheKey = `${contest.platform}:${contest.id}:${team.key}:${problem.id}`;
+    if (state.submissionCache.has(cacheKey)) return state.submissionCache.get(cacheKey);
+    const request = (contest.platform === 'Nowcoder'
+      ? loadNowcoderSubmissions(contest, team, problem)
+      : loadHduSubmissions(contest, team, problem)
+    ).catch(error => {
+      state.submissionCache.delete(cacheKey);
+      throw error;
+    });
+    state.submissionCache.set(cacheKey, request);
+    return request;
+  }
+
+  async function loadNowcoderSubmissions(contest, team, problem) {
+    const makeUrl = page => {
+      const query = new URLSearchParams({
+        id: contest.id,
+        page: String(page),
+        searchUserName: team.name,
+        problemIdFilter: problem.id,
+      });
+      return `/acm-heavy/acm/contest/status-list?${query}`;
+    };
+    const first = await fetchJson(makeUrl(1));
+    if (first.code !== 0 || !first.data) throw new Error(first.msg || '牛客提交记录接口返回异常。');
+    const pageCount = Math.max(1, Number(first.data.basicInfo?.pageCount || 1));
+    const rest = Array.from({ length: pageCount - 1 }, (_, index) => index + 2);
+    const pages = [first.data, ...await mapLimit(rest, MAX_CONCURRENCY, async page => {
+      const json = await fetchJson(makeUrl(page));
+      if (json.code !== 0 || !json.data) throw new Error(json.msg || `牛客提交记录第 ${page} 页返回异常。`);
+      return json.data;
+    })];
+    return pages.flatMap(page => page.data || [])
+      .filter(item => String(item.userId) === team.key
+        && String(item.problemId) === problem.id
+        && Number(item.submitTime) >= contest.startTime
+        && Number(item.submitTime) <= contest.endTime)
+      .map(item => ({
+        id: String(item.submissionId),
+        submitTime: Number(item.submitTime),
+        verdict: item.statusMessage || '未知结果',
+        language: item.languageName || item.language || '-',
+        timeMs: Number(item.time),
+        memoryKb: Number(item.memory),
+        sourceUrl: `/acm/contest/view-submission?submissionId=${encodeURIComponent(item.submissionId)}`,
+      }))
+      .sort((a, b) => a.submitTime - b.submitTime || Number(a.id) - Number(b.id));
+  }
+
+  async function loadHduSubmissions(contest, team, problem) {
+    if (!contest.selfTeamKey || team.key !== contest.selfTeamKey) {
+      throw new Error('HDU 只向当前登录队伍提供提交详情，无法读取其他队伍的提交记录。');
+    }
+    const teamCacheKey = `${contest.platform}:${contest.id}:${team.key}:*`;
+    let allRequest = state.submissionCache.get(teamCacheKey);
+    if (!allRequest) {
+      allRequest = loadHduTeamSubmissions(contest).catch(error => {
+        state.submissionCache.delete(teamCacheKey);
+        throw error;
+      });
+      state.submissionCache.set(teamCacheKey, allRequest);
+    }
+    const submissions = await allRequest;
+    return submissions.filter(item => item.problemId === problem.id);
+  }
+
+  async function loadHduTeamSubmissions(contest) {
+    const baseUrl = `/contest/status?cid=${encodeURIComponent(contest.id)}&status=`;
+    const firstHtml = await fetchText(`${baseUrl}&page=0`);
+    if (/Contest Login/i.test(firstHtml)) throw new Error('HDU 比赛登录已失效，请重新登录后再试。');
+    const pageNumbers = [...firstHtml.matchAll(/[?&]page=(\d+)/g)].map(match => Number(match[1]));
+    const lastPage = Math.max(0, ...pageNumbers);
+    const rest = Array.from({ length: lastPage }, (_, index) => index + 1);
+    const pages = [firstHtml, ...await mapLimit(rest, MAX_CONCURRENCY, page => fetchText(`${baseUrl}&page=${page}`))];
+    const submissions = pages.flatMap(html => parseHduSubmissionPage(html, contest));
+    const unique = new Map(submissions.map(item => [item.id, item]));
+    return [...unique.values()].sort((a, b) => a.submitTime - b.submitTime || Number(a.id) - Number(b.id));
+  }
+
+  function parseHduSubmissionPage(html, contest) {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    return [...doc.querySelectorAll('tr.page-card-row')].flatMap(row => {
+      const cells = [...row.querySelectorAll(':scope > td')];
+      if (cells.length < 7) return [];
+      const id = cells[0].textContent.trim();
+      const submitTime = parseHduDateTime(cells[1].textContent.trim());
+      const problemId = cells[2].textContent.trim();
+      if (!Number.isFinite(submitTime)
+        || submitTime < contest.startTime
+        || submitTime > contest.endTime) return [];
+      const timeMs = Number(cells[3].textContent.match(/[\d.]+/)?.[0]);
+      const memoryKb = Number(cells[4].textContent.match(/[\d.]+/)?.[0]);
+      const sourceHref = cells[5].querySelector('a')?.getAttribute('href');
+      return [{
+        id,
+        problemId,
+        submitTime,
+        verdict: cells[6].textContent.trim() || 'Unknown',
+        language: cells[5].textContent.trim() || '-',
+        timeMs,
+        memoryKb,
+        sourceUrl: sourceHref ? new URL(sourceHref, location.origin).href : '',
+      }];
+    });
   }
 
   function jumpEvent(ui, direction) {
@@ -882,6 +1177,7 @@
 
   function closePanel(ui) {
     stopPlayback(ui);
+    closeSubmissionModal(ui);
     ui.backdrop.classList.remove('open');
     ui.backdrop.setAttribute('aria-hidden', 'true');
   }
@@ -959,6 +1255,61 @@
     const minutes = Math.floor(second / 60) % 60;
     const seconds = second % 60;
     return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+  }
+
+  function parseHduDateTime(value) {
+    const match = String(value).trim().match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})$/);
+    if (!match) return Number.NaN;
+    return Date.parse(`${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:${match[6]}+08:00`);
+  }
+
+  function formatDateTime(timestamp) {
+    return new Intl.DateTimeFormat('zh-CN', {
+      timeZone: 'Asia/Shanghai',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    }).format(new Date(timestamp));
+  }
+
+  function formatRuntime(value) {
+    return Number.isFinite(value) ? `${value} ms` : '-';
+  }
+
+  function formatMemory(value) {
+    if (!Number.isFinite(value)) return '-';
+    if (value >= 1024) return `${roundDecimal(value / 1024, 1)} MB`;
+    return `${value} KB`;
+  }
+
+  function isAcceptedVerdict(verdict) {
+    return /accepted|答案正确/i.test(String(verdict));
+  }
+
+  function splitVerdictLabel(verdict) {
+    const value = String(verdict).trim();
+    const match = value.match(/^(.*?)\s*(\([^()]*\)|（[^（）]*）)$/);
+    return match ? [match[1], match[2]] : [value, ''];
+  }
+
+  function submissionVerdictClass(verdict) {
+    const value = String(verdict).trim();
+    if (/accepted|答案正确/i.test(value)) return 'accepted';
+    if (/wrong answer|答案错误/i.test(value)) return 'wrong-answer';
+    if (/time limit|运行超时/i.test(value)) return 'time-limit';
+    if (/memory limit|内存超限/i.test(value)) return 'memory-limit';
+    if (/compile|编译错误/i.test(value)) return 'compile-error';
+    if (/segment|access_violation|段错误/i.test(value)) return 'segment-fault';
+    if (/runtime|运行错误/i.test(value)) return 'runtime-error';
+    if (/执行出错|system error|judge error/i.test(value)) return 'execution-error';
+    if (/output limit|输出超限/i.test(value)) return 'output-limit';
+    if (/presentation|格式错误/i.test(value)) return 'presentation-error';
+    if (/pending|judg|queu|running|compiling|等待|评测|运行中/i.test(value)) return 'pending';
+    return 'other';
   }
 
   function parseDurationInput(value) {
