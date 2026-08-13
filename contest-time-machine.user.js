@@ -2,7 +2,7 @@
 // @name         ACM Contest Time Machine
 // @name:zh-CN   ACM 比赛时光榜
 // @namespace    https://github.com/Haerbin23456
-// @version      0.8.0
+// @version      0.9.0
 // @description  Rebuild Nowcoder and HDU ACM standings at any moment during a contest.
 // @description:zh-CN  回放牛客与杭电 ACM 比赛任意时刻的榜单。
 // @homepageURL  https://github.com/Haerbin23456/contest-time-machine
@@ -35,6 +35,8 @@
     second: 0,
     rowLimit: 100,
     query: '',
+    participantScope: 'all',
+    rankingMode: 'team',
     playing: false,
     playTimer: null,
     playbackSpeed: 60,
@@ -130,9 +132,14 @@
       .actm-duration { color: #596168; text-align: center; }
       .actm-speed-wrap { display: grid; grid-template-columns: minmax(50px,64px) auto; align-items: center; height: 32px; padding: 0 7px; border: 1px solid #c7ccd1; border-radius: 4px; background: #fff; color: #596168; }
       .actm-playback-speed { width: 100%; min-width: 0; padding: 0 2px; border: 0; outline: 0; background: transparent; color: #202124; text-align: right; font: inherit; font-variant-numeric: tabular-nums; }
-      .actm-filter { display: flex; align-items: center; gap: 8px; min-height: 46px; padding: 7px 14px; border-bottom: 1px solid #d9dde1; }
-      .actm-search { width: min(340px,40vw); height: 32px; padding: 0 10px; border: 1px solid #c7ccd1; border-radius: 4px; }
+      .actm-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 46px; padding: 7px 14px; border-bottom: 1px solid #d9dde1; }
+      .actm-search { width: min(340px,40vw); min-width: 180px; height: 32px; padding: 0 10px; border: 1px solid #c7ccd1; border-radius: 4px; }
       .actm-select { height: 32px; padding: 0 28px 0 8px; border: 1px solid #c7ccd1; border-radius: 4px; background: #fff; }
+      .actm-segmented { display: inline-flex; align-items: center; height: 32px; border: 1px solid #c7ccd1; border-radius: 4px; overflow: hidden; background: #fff; }
+      .actm-segment { min-width: 48px; height: 30px; padding: 0 10px; border: 0; border-right: 1px solid #d5d9dc; background: #fff; color: #4f575e; cursor: pointer; }
+      .actm-segment:last-child { border-right: 0; }
+      .actm-segment:hover { background: #f2f4f5; }
+      .actm-segment.active { background: #e4efe9; color: #155c3b; font-weight: 650; box-shadow: inset 0 0 0 1px #8bb7a0; }
       .actm-summary { margin-left: auto; color: #4f575e; font-size: 13px; font-variant-numeric: tabular-nums; }
       .actm-table-wrap { min-height: 0; overflow: auto; background: #fff; }
       .actm-table { width: max-content; min-width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; font-size: 13px; }
@@ -258,6 +265,9 @@
         .actm-speed-wrap { width: 66px; grid-template-columns: minmax(32px,1fr) auto; }
         .actm-play-controls .actm-button { min-width: 46px; padding: 0 7px; }
         .actm-filter { padding: 7px 8px; }
+        .actm-search { flex: 1 0 100%; width: 100%; }
+        .actm-segment { min-width: 44px; padding: 0 8px; }
+        .actm-summary { flex: 1 0 100%; text-align: right; }
         .actm-select { padding-left: 6px; padding-right: 22px; }
       }
     `;
@@ -311,7 +321,15 @@
             </div>
           </div>
           <div class="actm-filter">
-            <input class="actm-search" type="search" placeholder="队名、学校或拼音筛选" aria-label="搜索和筛选队伍" title="支持全拼和首字母；空格分隔多个条件；支持 team:、school:、rank:、solved:、penalty:、ac:，前置 - 可排除">
+            <input class="actm-search" type="search" placeholder="队名、机构或拼音筛选" aria-label="搜索和筛选队伍或机构" title="支持全拼和首字母；空格分隔多个条件；支持 team:、school:、rank:、solved:、penalty:、ac:，前置 - 可排除">
+            <div class="actm-segmented actm-participant-scope" role="group" aria-label="参赛层级">
+              <button class="actm-segment active" type="button" data-value="all" aria-pressed="true">全部</button>
+              <button class="actm-segment" type="button" data-value="university" aria-pressed="false">大学</button>
+            </div>
+            <div class="actm-segmented actm-ranking-mode" role="group" aria-label="排名方式">
+              <button class="actm-segment active" type="button" data-value="team" aria-pressed="true">队伍</button>
+              <button class="actm-segment" type="button" data-value="institution" aria-pressed="false">机构</button>
+            </div>
             <select class="actm-select row-limit" aria-label="显示行数">
               <option value="50">前 50</option>
               <option value="100" selected>前 100</option>
@@ -366,6 +384,8 @@
       play: root.querySelector('.play'),
       playbackSpeed: root.querySelector('.actm-playback-speed'),
       search: root.querySelector('.actm-search'),
+      participantScope: root.querySelector('.actm-participant-scope'),
+      rankingMode: root.querySelector('.actm-ranking-mode'),
       rowLimit: root.querySelector('.row-limit'),
       summary: root.querySelector('.actm-summary'),
       tableWrap: root.querySelector('.actm-table-wrap'),
@@ -433,6 +453,14 @@
       state.query = ui.search.value.trim();
       scheduleRender(ui);
     });
+    bindSegmentedControl(ui.participantScope, value => {
+      state.participantScope = value;
+      scheduleRender(ui);
+    });
+    bindSegmentedControl(ui.rankingMode, value => {
+      state.rankingMode = value;
+      scheduleRender(ui);
+    });
     ui.rowLimit.addEventListener('change', () => {
       state.rowLimit = Number(ui.rowLimit.value);
       scheduleRender(ui);
@@ -440,10 +468,11 @@
     ui.tableWrap.addEventListener('click', async event => {
       const button = event.target.closest('.actm-pin');
       if (button && state.contest) {
-        const key = button.dataset.teamKey;
-        if (!key) return;
-        if (state.pinnedTeamKeys.has(key)) state.pinnedTeamKeys.delete(key);
-        else state.pinnedTeamKeys.add(key);
+        const keys = decodePinKeys(button.dataset.pinKeys);
+        if (!keys.length) return;
+        const pinned = keys.some(key => state.pinnedTeamKeys.has(key));
+        if (pinned) keys.forEach(key => state.pinnedTeamKeys.delete(key));
+        else state.pinnedTeamKeys.add(keys[0]);
         savePinnedTeams(state.contest);
         render(ui);
         return;
@@ -486,6 +515,19 @@
         event.preventDefault();
         state.playing ? stopPlayback(ui) : startPlayback(ui);
       }
+    });
+  }
+
+  function bindSegmentedControl(control, onChange) {
+    control.addEventListener('click', event => {
+      const button = event.target.closest('.actm-segment');
+      if (!button || button.classList.contains('active')) return;
+      for (const item of control.querySelectorAll('.actm-segment')) {
+        const active = item === button;
+        item.classList.toggle('active', active);
+        item.setAttribute('aria-pressed', String(active));
+      }
+      onChange(button.dataset.value);
     });
   }
 
@@ -790,6 +832,104 @@
     return { rows, problemAccepted, totalAccepted };
   }
 
+  function participantRows(rows, scope) {
+    const filtered = scope === 'university'
+      ? rows.filter(row => isUniversityInstitution(institutionName(row)))
+      : rows;
+    return filtered.map(row => ({ ...row }));
+  }
+
+  function buildInstitutionRows(rows) {
+    const groups = new Map();
+    for (const row of rows) {
+      const name = institutionName(row);
+      const key = name ? normalizeSearchText(name) : `team:${row.key}`;
+      let group = groups.get(key);
+      if (!group) {
+        group = { name: name || row.name, members: [] };
+        groups.set(key, group);
+      }
+      group.members.push(row);
+    }
+    const representatives = [...groups.values()].map(group => {
+      const representative = group.members[0];
+      return {
+        ...representative,
+        institutionName: group.name,
+        institutionProvided: Boolean(institutionName(representative)),
+        representativeName: representative.name,
+        memberKeys: group.members.map(member => member.key),
+        memberNames: group.members.map(member => member.name),
+      };
+    });
+    return rankRows(representatives);
+  }
+
+  function rankRows(rows) {
+    const ranked = [...rows].sort(compareRankingRows);
+    let rank = 0;
+    let previous = null;
+    ranked.forEach((row, index) => {
+      const key = `${row.solved}:${row.penaltyMs}`;
+      if (key !== previous) rank = index + 1;
+      row.rank = rank;
+      previous = key;
+    });
+    return ranked;
+  }
+
+  function compareRankingRows(a, b) {
+    return b.solved - a.solved
+      || a.penaltyMs - b.penaltyMs
+      || a.finalRank - b.finalRank
+      || a.name.localeCompare(b.name);
+  }
+
+  function summarizeRankingRows(rows, problemCount) {
+    const problemAccepted = Array(problemCount).fill(0);
+    let solvedCount = 0;
+    let totalAccepted = 0;
+    for (const row of rows) {
+      if (row.solved > 0) solvedCount += 1;
+      totalAccepted += row.solved;
+      row.accepted.forEach((score, index) => {
+        if (score) problemAccepted[index] += 1;
+      });
+    }
+    return { solvedCount, totalAccepted, problemAccepted };
+  }
+
+  function institutionName(row) {
+    const school = String(row.school || '').trim();
+    if (!school || /^(?:none|null|n\/a|-|无|暂无|未填写|未提供)$/i.test(school)) return '';
+    const parts = school.split(/\s*[·•]\s*/).map(part => part.trim()).filter(Boolean);
+    return parts.at(-1) || school;
+  }
+
+  function isUniversityInstitution(name) {
+    const value = String(name || '').trim();
+    if (!value) return false;
+    if (/(?:附属)?(?:中学|小学|高中|初中)|附中|附小|high school|middle school|primary school|secondary school/i.test(value)) return false;
+    return /大学|学院|高等专科学校|职业技术学院|职业大学|\buniversity\b|\bcollege\b|\binstitute\b|\binst\.\s+of\b|\bpolytechnic\b|université|universität|università|universidad|universidade|universiteit|uniwersytet|sveučilište/i.test(value);
+  }
+
+  function isRowPinned(row) {
+    return (row.memberKeys || [row.key]).some(key => state.pinnedTeamKeys.has(key));
+  }
+
+  function encodePinKeys(keys) {
+    return encodeURIComponent(JSON.stringify(keys.map(String)));
+  }
+
+  function decodePinKeys(value) {
+    try {
+      const keys = JSON.parse(decodeURIComponent(value || ''));
+      return Array.isArray(keys) ? keys.map(String) : [];
+    } catch {
+      return [];
+    }
+  }
+
   function setSecond(ui, value, immediate = false, fromPlayback = false) {
     if (!state.contest) return;
     const second = clamp(Math.round(Number(value) || 0), 0, state.contest.durationSecond);
@@ -812,23 +952,30 @@
     const snapshot = snapshotAt(contest, state.second);
     const query = state.query;
     const searchPredicate = createSearchPredicate(query, contest);
-    let rows = query ? snapshot.rows.filter(searchPredicate) : snapshot.rows;
+    const scopedRows = participantRows(snapshot.rows, state.participantScope);
+    const rankingRows = state.rankingMode === 'institution'
+      ? buildInstitutionRows(scopedRows)
+      : rankRows(scopedRows);
+    const rankingSummary = summarizeRankingRows(rankingRows, contest.problems.length);
+    let rows = query ? rankingRows.filter(searchPredicate) : rankingRows;
     const matchedCount = rows.length;
-    const pinnedRows = rows.filter(row => state.pinnedTeamKeys.has(row.key));
-    const regularRows = rows.filter(row => !state.pinnedTeamKeys.has(row.key));
+    const pinnedRows = rows.filter(isRowPinned);
+    const regularRows = rows.filter(row => !isRowPinned(row));
     rows = state.rowLimit > 0
       ? [...pinnedRows, ...regularRows].slice(0, state.rowLimit)
       : [...pinnedRows, ...regularRows];
-    const teamsWithSolve = snapshot.rows.reduce((sum, row) => sum + (row.solved > 0 ? 1 : 0), 0);
-    ui.summary.textContent = `${teamsWithSolve} 队过题 · 总 AC ${snapshot.totalAccepted}`;
-    ui.status.textContent = `显示 ${rows.length}/${matchedCount} · 置顶 ${pinnedRows.length} · 数据源 ${contest.platform}`;
+    const unit = state.rankingMode === 'institution' ? '机构' : '队';
+    const scopeLabel = state.participantScope === 'university' ? '大学' : '全部';
+    const rankingLabel = state.rankingMode === 'institution' ? '机构榜' : '队伍榜';
+    ui.summary.textContent = `${rankingSummary.solvedCount} ${unit}过题 · 总 AC ${rankingSummary.totalAccepted}`;
+    ui.status.textContent = `显示 ${rows.length}/${matchedCount} · 置顶 ${pinnedRows.length} · ${scopeLabel} · ${rankingLabel} · 数据源 ${contest.platform}`;
 
     const header = contest.problems.map((problem, index) => `
       <th class="problem" title="${escapeHtml(problem.name)}">
         ${problem.url
           ? `<a class="actm-problem-link" href="${escapeHtml(problem.url)}" target="_blank" rel="noopener noreferrer" title="打开题目 ${escapeHtml(problem.name)}">${escapeHtml(problem.name)}</a>`
           : escapeHtml(problem.name)}
-        <span class="actm-problem-count">${snapshot.problemAccepted[index]}</span>
+        <span class="actm-problem-count">${rankingSummary.problemAccepted[index]}</span>
       </th>
     `).join('');
     const body = rows.map(row => {
@@ -841,16 +988,24 @@
         const first = score.firstBlood ? '*' : '';
         return `<td class="problem actm-accepted actm-submission-cell${wrongClass}" ${data} role="button" tabindex="0" title="${formatDuration(elapsedSecond)}，错误 ${score.failedCount} 次；点击查看提交记录">${Math.floor(elapsedSecond / 60)}${first}${fail}</td>`;
       }).join('');
-      const pinned = state.pinnedTeamKeys.has(row.key);
+      const pinned = isRowPinned(row);
+      const pinKeys = row.memberKeys || [row.key];
+      const primaryName = row.institutionName || row.name;
+      const secondaryName = row.institutionName
+        ? row.institutionProvided ? `代表队：${row.representativeName}` : '未提供机构信息'
+        : row.school;
+      const title = row.institutionName
+        ? row.institutionProvided ? `${row.institutionName} · 代表队 ${row.representativeName}` : `${row.name} · 未提供机构信息`
+        : `${row.name}${row.school ? ` · ${row.school}` : ''}`;
       return `
         <tr class="${pinned ? 'actm-pinned' : ''}">
           <td class="rank">${row.rank}</td>
-          <td class="team" title="${escapeHtml(row.name)}${row.school ? ` · ${escapeHtml(row.school)}` : ''}">
+          <td class="team" title="${escapeHtml(title)}">
             <div class="actm-team-cell">
-              <button class="actm-pin${pinned ? ' active' : ''}" type="button" data-team-key="${escapeHtml(row.key)}" title="${pinned ? '取消置顶' : '置顶队伍'}" aria-label="${pinned ? '取消置顶' : '置顶队伍'}">&#128204;</button>
+              <button class="actm-pin${pinned ? ' active' : ''}" type="button" data-pin-keys="${escapeHtml(encodePinKeys(pinKeys))}" title="${pinned ? '取消置顶' : `置顶${unit}`}" aria-label="${pinned ? '取消置顶' : `置顶${unit}`}">&#128204;</button>
               <div class="actm-team-copy">
-                <div class="actm-team-name">${escapeHtml(row.name)}</div>
-                <div class="actm-school">${escapeHtml(row.school)}</div>
+                <div class="actm-team-name">${escapeHtml(primaryName)}</div>
+                <div class="actm-school">${escapeHtml(secondaryName)}</div>
               </div>
             </div>
           </td>
@@ -864,7 +1019,7 @@
       <table class="actm-table">
         <thead><tr>
           <th class="rank">排名</th>
-          <th class="team">队伍</th>
+          <th class="team">${state.rankingMode === 'institution' ? '机构' : '队伍'}</th>
           <th class="solved">过题</th>
           <th class="penalty">罚时</th>
           ${header}
@@ -1349,8 +1504,10 @@
   }
 
   function matchesSearchFilter(row, filter, contest) {
-    if (filter.field === 'team') return matchesSearchText(row.name, filter.value);
-    if (filter.field === 'school') return matchesSearchText(row.school, filter.value);
+    const teamText = row.memberNames?.join(' ') || row.name;
+    const schoolText = row.institutionName || row.school;
+    if (filter.field === 'team') return matchesSearchText(teamText, filter.value);
+    if (filter.field === 'school') return matchesSearchText(schoolText, filter.value);
     if (filter.field === 'rank') return matchesNumericFilter(row.rank, filter.value);
     if (filter.field === 'solved') return matchesNumericFilter(row.solved, filter.value);
     if (filter.field === 'penalty') return matchesNumericFilter(Math.floor(row.penaltyMs / 60000), filter.value);
@@ -1360,7 +1517,7 @@
       if (filter.value === 'none') return acceptedProblems.length === 0;
       return acceptedProblems.some(problem => matchesSearchText(`${problem.id} ${problem.name}`, filter.value));
     }
-    return matchesSearchText(`${row.name} ${row.school}`, filter.value);
+    return matchesSearchText(`${teamText} ${schoolText}`, filter.value);
   }
 
   function matchesSearchText(text, keyword) {
