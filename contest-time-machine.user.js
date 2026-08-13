@@ -2,7 +2,7 @@
 // @name         ACM Contest Time Machine
 // @name:zh-CN   ACM 比赛时光榜
 // @namespace    https://github.com/Haerbin23456
-// @version      0.6.5
+// @version      0.7.0
 // @description  Rebuild Nowcoder and HDU ACM standings at any moment during a contest.
 // @description:zh-CN  回放牛客与杭电 ACM 比赛任意时刻的榜单。
 // @homepageURL  https://github.com/Haerbin23456/contest-time-machine
@@ -12,6 +12,7 @@
 // @license      MIT
 // @match        *://ac.nowcoder.com/acm/contest/*
 // @match        *://acm.hdu.edu.cn/contest/rank*
+// @require      https://cdn.jsdelivr.net/npm/pinyin-match@1.2.10/dist/main.js
 // @grant        none
 // @run-at       document-idle
 // ==/UserScript==
@@ -244,7 +245,7 @@
             </div>
           </div>
           <div class="actm-filter">
-            <input class="actm-search" type="search" placeholder="搜索队名或学校" aria-label="搜索队名或学校">
+            <input class="actm-search" type="search" placeholder="队名、学校或拼音筛选" aria-label="搜索和筛选队伍" title="支持全拼和首字母；空格分隔多个条件；支持 team:、school:、rank:、solved:、penalty:、ac:，前置 - 可排除">
             <select class="actm-select row-limit" aria-label="显示行数">
               <option value="50">前 50</option>
               <option value="100" selected>前 100</option>
@@ -329,7 +330,7 @@
       }
     });
     ui.search.addEventListener('input', () => {
-      state.query = ui.search.value.trim().toLocaleLowerCase();
+      state.query = ui.search.value.trim();
       scheduleRender(ui);
     });
     ui.rowLimit.addEventListener('change', () => {
@@ -697,9 +698,8 @@
     const contest = state.contest;
     const snapshot = snapshotAt(contest, state.second);
     const query = state.query;
-    let rows = query
-      ? snapshot.rows.filter(row => `${row.name}\n${row.school}`.toLocaleLowerCase().includes(query))
-      : snapshot.rows;
+    const searchPredicate = createSearchPredicate(query, contest);
+    let rows = query ? snapshot.rows.filter(searchPredicate) : snapshot.rows;
     const matchedCount = rows.length;
     const pinnedRows = rows.filter(row => state.pinnedTeamKeys.has(row.key));
     const regularRows = rows.filter(row => !state.pinnedTeamKeys.has(row.key));
@@ -932,6 +932,72 @@
     const hours = parts.pop() || 0;
     if (seconds >= 60 || minutes >= 60) return null;
     return hours * 3600 + minutes * 60 + seconds;
+  }
+
+  function createSearchPredicate(query, contest) {
+    const filters = parseSearchQuery(query);
+    if (!filters.length) return () => true;
+    return row => filters.every(filter => {
+      const matched = matchesSearchFilter(row, filter, contest);
+      return filter.exclude ? !matched : matched;
+    });
+  }
+
+  function parseSearchQuery(query) {
+    const filters = [];
+    const pattern = /(-)?(?:(team|school|rank|solved|penalty|ac):)?(?:"([^"]*)"|'([^']*)'|([^\s]+))/gi;
+    for (const match of String(query || '').matchAll(pattern)) {
+      const value = match[3] ?? match[4] ?? match[5] ?? '';
+      if (!value) continue;
+      filters.push({
+        exclude: Boolean(match[1]),
+        field: (match[2] || 'text').toLowerCase(),
+        value: normalizeSearchText(value),
+      });
+    }
+    return filters;
+  }
+
+  function matchesSearchFilter(row, filter, contest) {
+    if (filter.field === 'team') return matchesSearchText(row.name, filter.value);
+    if (filter.field === 'school') return matchesSearchText(row.school, filter.value);
+    if (filter.field === 'rank') return matchesNumericFilter(row.rank, filter.value);
+    if (filter.field === 'solved') return matchesNumericFilter(row.solved, filter.value);
+    if (filter.field === 'penalty') return matchesNumericFilter(Math.floor(row.penaltyMs / 60000), filter.value);
+    if (filter.field === 'ac') {
+      const acceptedProblems = row.accepted.flatMap((score, index) => score ? [contest.problems[index]] : []);
+      if (filter.value === 'any') return acceptedProblems.length > 0;
+      if (filter.value === 'none') return acceptedProblems.length === 0;
+      return acceptedProblems.some(problem => matchesSearchText(`${problem.id} ${problem.name}`, filter.value));
+    }
+    return matchesSearchText(`${row.name} ${row.school}`, filter.value);
+  }
+
+  function matchesSearchText(text, keyword) {
+    const normalizedText = normalizeSearchText(text);
+    if (normalizedText.includes(keyword)) return true;
+    try {
+      return Boolean(globalThis.PinyinMatch?.match(normalizedText, keyword));
+    } catch {
+      return false;
+    }
+  }
+
+  function matchesNumericFilter(actual, expression) {
+    const range = expression.match(/^(\d+)-(\d+)$/);
+    if (range) return actual >= Number(range[1]) && actual <= Number(range[2]);
+    const comparison = expression.match(/^(<=|>=|<|>|=)?(\d+)$/);
+    if (!comparison) return false;
+    const expected = Number(comparison[2]);
+    if (comparison[1] === '<') return actual < expected;
+    if (comparison[1] === '<=') return actual <= expected;
+    if (comparison[1] === '>') return actual > expected;
+    if (comparison[1] === '>=') return actual >= expected;
+    return actual === expected;
+  }
+
+  function normalizeSearchText(value) {
+    return String(value ?? '').normalize('NFKC').toLocaleLowerCase();
   }
 
   function escapeHtml(value) {
