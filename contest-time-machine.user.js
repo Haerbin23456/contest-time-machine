@@ -2,7 +2,7 @@
 // @name         ACM Contest Time Machine
 // @name:zh-CN   ACM 比赛时光榜
 // @namespace    https://github.com/Haerbin23456
-// @version      0.7.0
+// @version      0.7.1
 // @description  Rebuild Nowcoder and HDU ACM standings at any moment during a contest.
 // @description:zh-CN  回放牛客与杭电 ACM 比赛任意时刻的榜单。
 // @homepageURL  https://github.com/Haerbin23456/contest-time-machine
@@ -226,12 +226,12 @@
               </div>
             </div>
             <div class="actm-play-controls">
-              <label class="actm-time-editor" title="编辑当前赛时；后半部分为比赛总时长">
+              <label class="actm-time-editor" title="编辑当前赛时；在时、分、秒上滚轮可分别调整">
                 <input class="actm-offset" type="text" inputmode="text" value="00:00:00" placeholder="00:00:00" spellcheck="false" aria-label="开赛后的时分秒">
                 <span>/</span>
                 <output class="actm-duration">00:00:00</output>
               </label>
-              <label class="actm-speed-wrap" title="选择预设或输入任意播放倍速">
+              <label class="actm-speed-wrap" title="选择、输入或滚轮调整播放倍速；Shift + 滚轮使用 10 倍步长">
                 <input class="actm-playback-speed" type="number" list="acm-time-machine-speed-presets" min="0.1" max="10000" step="any" value="60" aria-label="播放倍速">
                 <span>&times;</span>
               </label>
@@ -316,12 +316,14 @@
       if (second === null) ui.offset.value = formatDuration(state.second);
       else setSecond(ui, second);
     });
+    ui.offset.addEventListener('wheel', event => adjustTimeByWheel(ui, event), { passive: false });
     ui.minusFive.addEventListener('click', () => setSecond(ui, state.second - 5 * 60));
     ui.plusFive.addEventListener('click', () => setSecond(ui, state.second + 5 * 60));
     ui.prevEvent.addEventListener('click', () => jumpEvent(ui, -1));
     ui.nextEvent.addEventListener('click', () => jumpEvent(ui, 1));
     ui.play.addEventListener('click', () => state.playing ? stopPlayback(ui) : startPlayback(ui));
     ui.playbackSpeed.addEventListener('change', () => commitPlaybackSpeed(ui));
+    ui.playbackSpeed.addEventListener('wheel', event => adjustPlaybackSpeedByWheel(ui, event), { passive: false });
     ui.playbackSpeed.addEventListener('keydown', event => {
       if (event.key === 'Enter') {
         event.preventDefault();
@@ -823,6 +825,43 @@
       // Keep the setting for the current page when site storage is unavailable.
     }
     resetPlaybackAnchor();
+  }
+
+  function adjustTimeByWheel(ui, event) {
+    if (!state.contest || event.ctrlKey || event.deltaY === 0) return;
+    event.preventDefault();
+    const rect = ui.offset.getBoundingClientRect();
+    const ratio = clamp((event.clientX - rect.left) / Math.max(1, rect.width), 0, 0.999999);
+    const segment = Math.floor(ratio * 3);
+    const units = [3600, 60, 1];
+    const direction = event.deltaY < 0 ? 1 : -1;
+    setSecond(ui, state.second + direction * units[segment]);
+    ui.offset.focus({ preventScroll: true });
+    ui.offset.setSelectionRange(segment * 3, segment * 3 + 2);
+  }
+
+  function adjustPlaybackSpeedByWheel(ui, event) {
+    if (event.ctrlKey || event.deltaY === 0) return;
+    event.preventDefault();
+    const current = Number(ui.playbackSpeed.value);
+    const speed = Number.isFinite(current) && current >= 0.1 && current <= 10000
+      ? current
+      : state.playbackSpeed;
+    const step = playbackSpeedWheelStep(speed) * (event.shiftKey ? 10 : 1);
+    const direction = event.deltaY < 0 ? 1 : -1;
+    ui.playbackSpeed.value = String(roundDecimal(clamp(speed + direction * step, 0.1, 10000), 3));
+    commitPlaybackSpeed(ui);
+    ui.playbackSpeed.focus({ preventScroll: true });
+    ui.playbackSpeed.select();
+  }
+
+  function playbackSpeedWheelStep(speed) {
+    return Math.max(0.1, 10 ** (Math.floor(Math.log10(Math.max(0.1, speed))) - 1));
+  }
+
+  function roundDecimal(value, precision) {
+    const scale = 10 ** precision;
+    return Math.round((value + Number.EPSILON) * scale) / scale;
   }
 
   function loadPlaybackSpeed() {
